@@ -11,20 +11,18 @@ public class BasicSpawner : MonoBehaviour, INetworkRunnerCallbacks
 {
     [SerializeField] private NetworkPrefabRef _playerPrefab;
 
-    [Header("Camera (assign or leave empty to use Camera.main)")]
+    [Header("Camera (assign the actual Camera GameObject here, or leave empty to use Camera.main)")]
     [SerializeField] private Camera mainCamera;
 
-    [Header("Camera attach settings")]
-    [Tooltip("Optional child name on the player prefab to attach the camera to. If not found, camera will parent to player root.")]
-    public string cameraAnchorName = "CameraAnchor";
+    [Header("Optional: name of child transform inside the player to parent the camera to (case-insensitive)")]
+    [SerializeField] private string cameraAnchorName = "CameraAnchor";
 
-    private NetworkRunner _runner;
-    // server-side tracking (keeps original behavior)
+    // server-side spawned tracking
     private Dictionary<PlayerRef, NetworkObject> _spawnedCharacters = new Dictionary<PlayerRef, NetworkObject>();
 
-    // ----------------------------------------------------------------
-    // INetworkRunnerCallbacks
-    // ----------------------------------------------------------------
+    private NetworkRunner _runner;
+
+    // ---------- Fusion callbacks ----------
     public void OnPlayerJoined(NetworkRunner runner, PlayerRef player)
     {
         // Server spawns the networked player object
@@ -33,12 +31,14 @@ public class BasicSpawner : MonoBehaviour, INetworkRunnerCallbacks
             Vector3 spawnPosition = new Vector3((player.RawEncoded % 4) * 3, 1, 0);
             NetworkObject networkPlayerObject = runner.Spawn(_playerPrefab, spawnPosition, Quaternion.identity, player);
             _spawnedCharacters.Add(player, networkPlayerObject);
+            Debug.Log($"[BasicSpawner] Server spawned player for {player} -> {networkPlayerObject.name}");
         }
 
-        // If this join corresponds to the local player on this runner, attach local camera when the local NetworkObject is available
+        // Attach camera only for the local client that owns this player
         if (runner.LocalPlayer == player)
         {
-            StartCoroutine(AttachMainCameraToLocalPlayerWhenReady(runner, player));
+            Debug.Log("[BasicSpawner] Local player joined on this runner -> starting attach coroutine.");
+            StartCoroutine(AttachCameraToLocalPlayerWhenReady(runner, player));
         }
     }
 
@@ -51,9 +51,7 @@ public class BasicSpawner : MonoBehaviour, INetworkRunnerCallbacks
         }
     }
 
-    // -------------------------
-    // Input / update
-    // -------------------------
+    // ---------- Input boilerplate ----------
     private bool _mouseButton0;
     private bool _mouseButton1;
 
@@ -81,7 +79,7 @@ public class BasicSpawner : MonoBehaviour, INetworkRunnerCallbacks
         input.Set(data);
     }
 
-    // Empty implementations for the rest of INetworkRunnerCallbacks methods
+    // other Fusion callbacks (empty implementations)
     public void OnInputMissing(NetworkRunner r, PlayerRef p, NetworkInput i) { }
     public void OnShutdown(NetworkRunner r, ShutdownReason s) { }
     public void OnConnectedToServer(NetworkRunner r) { }
@@ -99,17 +97,14 @@ public class BasicSpawner : MonoBehaviour, INetworkRunnerCallbacks
     public void OnReliableDataReceived(NetworkRunner r, PlayerRef player, ReliableKey key, ArraySegment<byte> data) { }
     public void OnReliableDataProgress(NetworkRunner r, PlayerRef player, ReliableKey key, float progress) { }
 
-    // ----------------------------------------------------------------
-    // Game start / UI
-    // ----------------------------------------------------------------
+    // ---------- Start/Host/Join ----------
     async void StartGame(GameMode mode)
     {
-        // Keep a reference to the runner we create
         _runner = gameObject.AddComponent<NetworkRunner>();
         _runner.ProvideInput = true;
 
-        var runnerSimulatePhysics3D = gameObject.AddComponent<RunnerSimulatePhysics3D>();
-        runnerSimulatePhysics3D.ClientPhysicsSimulation = ClientPhysicsSimulation.SimulateAlways;
+        var physicsSim = gameObject.AddComponent<RunnerSimulatePhysics3D>();
+        physicsSim.ClientPhysicsSimulation = ClientPhysicsSimulation.SimulateAlways;
 
         var scene = SceneRef.FromIndex(SceneManager.GetActiveScene().buildIndex);
 
@@ -126,30 +121,23 @@ public class BasicSpawner : MonoBehaviour, INetworkRunnerCallbacks
     {
         if (_runner == null)
         {
-            if (GUI.Button(new Rect(0, 0, 200, 40), "Host"))
-            {
-                StartGame(GameMode.Host);
-            }
-            if (GUI.Button(new Rect(0, 40, 200, 40), "Join"))
-            {
-                StartGame(GameMode.Client);
-            }
+            if (GUI.Button(new Rect(0, 0, 200, 40), "Host")) StartGame(GameMode.Host);
+            if (GUI.Button(new Rect(0, 40, 200, 40), "Join")) StartGame(GameMode.Client);
         }
     }
 
-    // ----------------------------------------------------------------
-    // Camera attach coroutine & helper
-    // ----------------------------------------------------------------
-    private IEnumerator AttachMainCameraToLocalPlayerWhenReady(NetworkRunner runner, PlayerRef player)
+    // ---------- Robust camera attach coroutine ----------
+    private IEnumerator AttachCameraToLocalPlayerWhenReady(NetworkRunner runner, PlayerRef player)
     {
-        float timeout = 5f;
+        float timeout = 10f;           // longer timeout for slow networks
         float elapsed = 0f;
-        float poll = 0.05f;
+        float pollInterval = 0.05f;
 
         while (elapsed < timeout)
         {
             NetworkObject playerObj = null;
 
+            // 1) Preferred: use Fusion API
             try
             {
                 playerObj = runner.GetPlayerObject(player);
@@ -159,68 +147,110 @@ public class BasicSpawner : MonoBehaviour, INetworkRunnerCallbacks
                 playerObj = null;
             }
 
+            // 2) Fallback on server: if we're server and tracked in _spawnedCharacters
+            if (playerObj == null && runner.IsServer)
+            {
+                if (_spawnedCharacters.TryGetValue(player, out NetworkObject serverObj))
+                {
+                    playerObj = serverObj;
+                }
+            }
+
+            // 3) Fallback on client: search scene for a NetworkObject that has input authority (local player object)
+            if (playerObj == null)
+            {
+                try
+                {
+                    var all = GameObject.FindObjectsOfType<NetworkObject>();
+                    foreach (var no in all)
+                    {
+                        // safe check: prefer objects that report they have input authority
+                        bool hasInput = false;
+                        try { hasInput = no.HasInputAuthority; } catch { /* API differences might require method - this is safest */ }
+
+                        if (hasInput)
+                        {
+                            // we found a local-controlled NetworkObject — assume it's our player
+                            playerObj = no;
+                            break;
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning("[BasicSpawner] Exception while scanning NetworkObjects: " + ex.Message);
+                }
+            }
+
             if (playerObj != null)
             {
-                AttachMainCameraToPlayerObject(playerObj);
+                AttachAndConfigureCamera(playerObj);
                 yield break;
             }
 
-            elapsed += poll;
-            yield return new WaitForSeconds(poll);
+            elapsed += pollInterval;
+            yield return new WaitForSeconds(pollInterval);
         }
 
-        Debug.LogWarning("[BasicSpawner] Timed out waiting for local player NetworkObject.");
+        Debug.LogWarning("[BasicSpawner] Timed out waiting for local player's NetworkObject.");
     }
 
-    private void AttachMainCameraToPlayerObject(NetworkObject playerNetworkObject)
-{
-    if (playerNetworkObject == null)
+    private void AttachAndConfigureCamera(NetworkObject playerNetworkObject)
     {
-        Debug.LogWarning("[BasicSpawner] playerNetworkObject is null in AttachMainCameraToPlayerObject.");
-        return;
-    }
-
-    // Resolve camera
-    Camera cam = mainCamera != null ? mainCamera : Camera.main;
-    if (cam == null)
-    {
-        Debug.LogWarning("[BasicSpawner] No main camera assigned and Camera.main is null.");
-        return;
-    }
-
-    // 🔥 FORCE THE TAG
-    cam.tag = "MainCamera";
-
-    // Find anchor on the player (optional)
-    Transform parentTransform = null;
-    if (!string.IsNullOrEmpty(cameraAnchorName))
-    {
-        var found = playerNetworkObject.transform.Find(cameraAnchorName);
-        if (found != null)
-            parentTransform = found;
-        else
+        if (playerNetworkObject == null)
         {
-            foreach (Transform t in playerNetworkObject.transform)
+            Debug.LogWarning("[BasicSpawner] AttachAndConfigureCamera called with null playerNetworkObject.");
+            return;
+        }
+
+        // Resolve the actual camera instance: inspector assigned or Camera.main
+        Camera cam = mainCamera != null ? mainCamera : Camera.main;
+        if (cam == null)
+        {
+            Debug.LogWarning("[BasicSpawner] No camera assigned in inspector and Camera.main is null. Cannot attach.");
+            return;
+        }
+
+        // Force tag to MainCamera so Camera.main queries work later
+        cam.tag = "MainCamera";
+
+        // Find anchor on player (case-insensitive if provided)
+        Transform parentTransform = null;
+        if (!string.IsNullOrEmpty(cameraAnchorName))
+        {
+            var found = playerNetworkObject.transform.Find(cameraAnchorName);
+            if (found != null)
+                parentTransform = found;
+            else
             {
-                if (string.Equals(t.name, cameraAnchorName, StringComparison.OrdinalIgnoreCase))
+                foreach (Transform t in playerNetworkObject.transform)
                 {
-                    parentTransform = t;
-                    break;
+                    if (string.Equals(t.name, cameraAnchorName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        parentTransform = t;
+                        break;
+                    }
                 }
             }
         }
+
+        // Fall back to player root if no anchor found
+        if (parentTransform == null)
+            parentTransform = playerNetworkObject.transform;
+
+        // Parent the camera to the player; do NOT preserve world position so we control local transform
+        cam.transform.SetParent(parentTransform, worldPositionStays: false);
+
+        // Set **exact local** transform values required:
+        Vector3 lp = cam.transform.localPosition;
+        lp.y = 1.17f;
+        lp.z = -2f;
+        cam.transform.localPosition = lp;
+
+        Vector3 lr = cam.transform.localEulerAngles;
+        lr.x = 14f;
+        cam.transform.localEulerAngles = lr;
+
+        Debug.Log($"[BasicSpawner] Camera '{cam.name}' attached to '{playerNetworkObject.name}' at localPos={cam.transform.localPosition}, localRot={cam.transform.localEulerAngles}");
     }
-
-    if (parentTransform == null)
-        parentTransform = playerNetworkObject.transform;
-
-    cam.transform.SetParent(parentTransform, false);
-
-    // Apply your camera transform
-    cam.transform.localPosition = new Vector3(0f, 1.17f, -2f);
-    cam.transform.localRotation = Quaternion.Euler(14f, 0f, 0f);
-
-    Debug.Log("[BasicSpawner] Camera tag forced to MainCamera.");
-}
-
 }

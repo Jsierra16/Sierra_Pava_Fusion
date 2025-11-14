@@ -10,7 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 43527720132639101}
   m_Layer: 0
-  m_Name: Camera
+  m_Name: CameraAnchor
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -183,7 +183,6 @@ GameObject:
   - component: {fileID: 8290739095902636128}
   - component: {fileID: 7277089753907366884}
   - component: {fileID: -5818153461026017731}
-  - component: {fileID: 3059110621222779339}
   m_Layer: 0
   m_Name: PlayerPrefab
   m_TagString: Player
@@ -339,20 +338,6 @@ BoxCollider:
   serializedVersion: 3
   m_Size: {x: 1, y: 1, z: 1}
   m_Center: {x: 0, y: 0, z: 0}
---- !u!114 &3059110621222779339
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7704738375554386482}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 5e1de5e3d7eb63943a701837142d6985, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  cameraToAttach: {fileID: 0}
-  cameraAnchor: {fileID: 43527720132639101}
 --- !u!1 &8438140931717796412
 GameObject:
   m_ObjectHideFlags: 0
