@@ -9,18 +9,59 @@ using UnityEngine.SceneManagement;
 public class BasicSpawner : MonoBehaviour, INetworkRunnerCallbacks
 {
     [SerializeField] private NetworkPrefabRef _playerPrefab;
+
+    // The camera we will re-parent to the local player
+    [SerializeField] private Camera mainCamera;
+
     private Dictionary<PlayerRef, NetworkObject> _spawnedCharacters = new Dictionary<PlayerRef, NetworkObject>();
+    private NetworkRunner _runner;
 
     public void OnPlayerJoined(NetworkRunner runner, PlayerRef player)
     {
         if (runner.IsServer)
         {
-            // Create a unique position for the player
-            Vector3 spawnPosition = new Vector3((player.RawEncoded % runner.Config.Simulation.PlayerCount) * 3, 1, 0);
+            // Unique position
+            Vector3 spawnPosition = new Vector3((player.RawEncoded % 4) * 3, 1, 0);
             NetworkObject networkPlayerObject = runner.Spawn(_playerPrefab, spawnPosition, Quaternion.identity, player);
-            // Keep track of the player avatars for easy access
+
             _spawnedCharacters.Add(player, networkPlayerObject);
         }
+
+        // Attach camera for local player only
+        if (runner.LocalPlayer == player)
+            TryAttachCamera(runner, player);
+    }
+
+    private async void TryAttachCamera(NetworkRunner runner, PlayerRef player)
+    {
+        // Wait until Fusion has fully spawned the player object
+        await System.Threading.Tasks.Task.Delay(100);
+
+        if (!_spawnedCharacters.TryGetValue(player, out NetworkObject playerObj))
+            return;
+
+        if (mainCamera == null)
+            mainCamera = Camera.main;
+
+        if (mainCamera == null)
+            return;
+
+        // Re-parent camera under player
+        mainCamera.transform.SetParent(playerObj.transform);
+
+        // Set new camera local position
+        mainCamera.transform.localPosition = new Vector3(
+            0f,        // X
+            1.17f,     // Y
+            -2f        // Z
+        );
+
+        // Set rotation
+        mainCamera.transform.localRotation = Quaternion.Euler(
+            14f,   // X
+            0f,    // Y
+            0f     // Z
+        );
     }
 
     public void OnPlayerLeft(NetworkRunner runner, PlayerRef player)
@@ -31,76 +72,75 @@ public class BasicSpawner : MonoBehaviour, INetworkRunnerCallbacks
             _spawnedCharacters.Remove(player);
         }
     }
-private bool _mouseButton0;
-private bool _mouseButton1;
-private void Update()
-{
-  _mouseButton0 = _mouseButton0 || Input.GetMouseButton(0);
-  _mouseButton1 = _mouseButton1 || Input.GetMouseButton(1);
-}
 
-public void OnInput(NetworkRunner runner, NetworkInput input)
-{
-  var data = new NetworkInputData();
+    private bool _mouseButton0;
+    private bool _mouseButton1;
 
-  if (Input.GetKey(KeyCode.W))
-    data.direction += Vector3.forward;
+    private void Update()
+    {
+        _mouseButton0 = _mouseButton0 || Input.GetMouseButton(0);
+        _mouseButton1 = _mouseButton1 || Input.GetMouseButton(1);
+    }
 
-  if (Input.GetKey(KeyCode.S))
-    data.direction += Vector3.back;
+    public void OnInput(NetworkRunner runner, NetworkInput input)
+    {
+        var data = new NetworkInputData();
 
-  if (Input.GetKey(KeyCode.A))
-    data.direction += Vector3.left;
+        if (Input.GetKey(KeyCode.W)) data.direction += Vector3.forward;
+        if (Input.GetKey(KeyCode.S)) data.direction += Vector3.back;
+        if (Input.GetKey(KeyCode.A)) data.direction += Vector3.left;
+        if (Input.GetKey(KeyCode.D)) data.direction += Vector3.right;
 
-  if (Input.GetKey(KeyCode.D))
-    data.direction += Vector3.right;
+        data.buttons.Set(NetworkInputData.MOUSEBUTTON0, _mouseButton0);
+        _mouseButton0 = false;
 
-  data.buttons.Set(NetworkInputData.MOUSEBUTTON0, _mouseButton0);
-  _mouseButton0 = false;
-  data.buttons.Set(NetworkInputData.MOUSEBUTTON1, _mouseButton1);
-  _mouseButton1 = false;
+        data.buttons.Set(NetworkInputData.MOUSEBUTTON1, _mouseButton1);
+        _mouseButton1 = false;
 
-  input.Set(data);
-}
+        input.Set(data);
+    }
 
-    public void OnInputMissing(NetworkRunner runner, PlayerRef player, NetworkInput input) { }
-    public void OnShutdown(NetworkRunner runner, ShutdownReason shutdownReason) { }
-    public void OnConnectedToServer(NetworkRunner runner) { }
-    public void OnDisconnectedFromServer(NetworkRunner runner, NetDisconnectReason reason) { }
-    public void OnConnectRequest(NetworkRunner runner, NetworkRunnerCallbackArgs.ConnectRequest request, byte[] token) { }
-    public void OnConnectFailed(NetworkRunner runner, NetAddress remoteAddress, NetConnectFailedReason reason) { }
-    public void OnUserSimulationMessage(NetworkRunner runner, SimulationMessagePtr message) { }
-    public void OnSessionListUpdated(NetworkRunner runner, List<SessionInfo> sessionList) { }
-    public void OnCustomAuthenticationResponse(NetworkRunner runner, Dictionary<string, object> data) { }
-    public void OnHostMigration(NetworkRunner runner, HostMigrationToken hostMigrationToken) { }
-    public void OnSceneLoadDone(NetworkRunner runner) { }
-    public void OnSceneLoadStart(NetworkRunner runner) { }
-    public void OnObjectExitAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
-    public void OnObjectEnterAOI(NetworkRunner runner, NetworkObject obj, PlayerRef player) { }
-    public void OnReliableDataReceived(NetworkRunner runner, PlayerRef player, ReliableKey key, ArraySegment<byte> data) { }
-    public void OnReliableDataProgress(NetworkRunner runner, PlayerRef player, ReliableKey key, float progress) { }
+    // Empty Fusion callbacks
+    public void OnInputMissing(NetworkRunner r, PlayerRef p, NetworkInput i) { }
+    public void OnShutdown(NetworkRunner r, ShutdownReason s) { }
+    public void OnConnectedToServer(NetworkRunner r) { }
+    public void OnDisconnectedFromServer(NetworkRunner r, NetDisconnectReason reason) { }
+    public void OnConnectRequest(NetworkRunner r, NetworkRunnerCallbackArgs.ConnectRequest req, byte[] token) { }
+    public void OnConnectFailed(NetworkRunner r, NetAddress remote, NetConnectFailedReason reason) { }
+    public void OnUserSimulationMessage(NetworkRunner r, SimulationMessagePtr msg) { }
+    public void OnSessionListUpdated(NetworkRunner r, List<SessionInfo> sessionList) { }
+    public void OnCustomAuthenticationResponse(NetworkRunner r, Dictionary<string, object> data) { }
+    public void OnHostMigration(NetworkRunner r, HostMigrationToken hostMigrationToken) { }
+    public void OnSceneLoadDone(NetworkRunner r) { }
+    public void OnSceneLoadStart(NetworkRunner r) { }
+    public void OnObjectExitAOI(NetworkRunner r, NetworkObject obj, PlayerRef player) { }
+    public void OnObjectEnterAOI(NetworkRunner r, NetworkObject obj, PlayerRef player) { }
+    public void OnReliableDataReceived(NetworkRunner r, PlayerRef player, ReliableKey key, ArraySegment<byte> data) { }
+    public void OnReliableDataProgress(NetworkRunner r, PlayerRef player, ReliableKey key, float progress) { }
 
-    private NetworkRunner _runner;
+    // Start button UI
+    private void OnGUI()
+    {
+        if (_runner == null)
+        {
+            if (GUI.Button(new Rect(0, 0, 200, 40), "Host"))
+                StartGame(GameMode.Host);
+
+            if (GUI.Button(new Rect(0, 40, 200, 40), "Join"))
+                StartGame(GameMode.Client);
+        }
+    }
 
     async void StartGame(GameMode mode)
     {
-        // Create the Fusion runner and let it know that we will be providing user input
         _runner = gameObject.AddComponent<NetworkRunner>();
         _runner.ProvideInput = true;
-        
 
-        var runnerSimulatePhysics3D = gameObject.AddComponent<RunnerSimulatePhysics3D>();
-        runnerSimulatePhysics3D.ClientPhysicsSimulation = ClientPhysicsSimulation.SimulateAlways;
+        var physicsSim = gameObject.AddComponent<RunnerSimulatePhysics3D>();
+        physicsSim.ClientPhysicsSimulation = ClientPhysicsSimulation.SimulateAlways;
 
-        // Create the NetworkSceneInfo from the current scene
         var scene = SceneRef.FromIndex(SceneManager.GetActiveScene().buildIndex);
-        var sceneInfo = new NetworkSceneInfo();
-        if (scene.IsValid)
-        {
-            sceneInfo.AddSceneRef(scene, LoadSceneMode.Additive);
-        }
 
-        // Start or join (depends on gamemode) a session with a specific name
         await _runner.StartGame(new StartGameArgs()
         {
             GameMode = mode,
@@ -109,20 +149,4 @@ public void OnInput(NetworkRunner runner, NetworkInput input)
             SceneManager = gameObject.AddComponent<NetworkSceneManagerDefault>()
         });
     }
-
-    private void OnGUI()
-    {
-        if (_runner == null)
-        {
-            if (GUI.Button(new Rect(0, 0, 200, 40), "Host"))
-            {
-                StartGame(GameMode.Host);
-            }
-            if (GUI.Button(new Rect(0, 40, 200, 40), "Join"))
-            {
-                StartGame(GameMode.Client);
-            }
-        }
-    }
 }
-
