@@ -5,34 +5,37 @@ public class CameraAttachOnSpawn : MonoBehaviour
     [Header("Camera to attach")]
     public Camera cameraToAttach;
 
-    [Header("Prefab to detect")]
-    public GameObject prefabToWatch;
+    [Header("Optional: where to attach on the player")]
+    public Transform cameraAnchor; // assign a point OR leave empty to use player root
 
-    private bool attached = false;
-
-    void Update()
+    private void Start()
     {
-        if (attached) return;
-        if (cameraToAttach == null || prefabToWatch == null) return;
-
-        GameObject[] objects = FindObjectsOfType<GameObject>();
-
-        foreach (var obj in objects)
+        if (cameraToAttach == null)
         {
-            // Detect prefab instance by name
-            if (obj.name.Contains(prefabToWatch.name))
-            {
-                // Make camera a child of the prefab instance
-                cameraToAttach.transform.SetParent(obj.transform, true);
-
-                // Set ONLY the X to 0
-                Vector3 localPos = cameraToAttach.transform.localPosition;
-                localPos.x = 0;
-                cameraToAttach.transform.localPosition = localPos;
-
-                attached = true;
-                return;
-            }
+            Debug.LogWarning("CameraAttachOnSpawn: No camera assigned.");
+            return;
         }
+
+        // If no anchor is assigned, parent to the player itself
+        Transform parent = cameraAnchor != null ? cameraAnchor : transform;
+
+        // Parent camera to the player
+        cameraToAttach.transform.SetParent(parent, false);
+
+        // Force required local position and rotation
+        cameraToAttach.transform.localPosition = new Vector3(
+            cameraToAttach.transform.localPosition.x,  
+            1.17f,
+            -2f
+        );
+
+        cameraToAttach.transform.localEulerAngles = new Vector3(
+            14f,
+            cameraToAttach.transform.localEulerAngles.y,
+            cameraToAttach.transform.localEulerAngles.z
+        );
+
+        // Make sure it's tagged correctly
+        cameraToAttach.tag = "MainCamera";
     }
 }
